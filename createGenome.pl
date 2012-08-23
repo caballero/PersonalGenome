@@ -84,7 +84,6 @@ my $sex       =   'M';
 
 # Main variables
 my $our_version = 0.1;        # Script version number
-my ($seq, $num, $hap, $chr, $ini, $end, $call, $ref, $all1, $all2, $sco1, $sco2, $lenr, $len1, $len2);
 my %hap1;
 my %hap2;
 my %event1;
@@ -120,27 +119,27 @@ foreach my $t (@types) {
 }
 
 if (defined $snv) {
-    warn "processing variations in $snv\n" if (defined $verbose);
+    warn "processing small variations in $snv\n" if (defined $verbose);
     my $snv_fh = defineFH($snv);
     open F, "$snv_fh" or die "cannot open file $snv\n";
     while (<F>) {
         next if  (m/^#/);
         next if  (m/^>/);
         next if  (m/^\n/);
-        ($num, $hap, $chr, $ini, $end, $call, $type, $ref, $all1, $all2, $sco1, $sco2) = split (/\s+/, $_);
+        my ($nul1, $nul2, $chr, $ini, $end, $call, $type, $ref, $all1, $all2, $sco1, $sco2) = split (/\s+/, $_);
         next if  ($call eq 'no-call');
         next if  ($type eq 'ref');
         next if  ($type eq 'complex');
         next if !(defined $types{$type});
         next if !(defined $hap1{$chr});
-        $lenr = length $ref;
-        $len1 = length $all1;
-        $len2 = length $all2;
+        my $lenr = length $ref;
+        my $len1 = length $all1;
+        my $len2 = length $all2;
         if ($lenr == $len1) {
             substr($hap1{$chr}, $ini, $len1) = $all1 if ($all1 ne '?' and $ref ne $all1);
         }
         elsif ($type eq 'del') {
-            substr($hap1{$chr}, $ini, $lenr) = 'X' x $lenr if ($len1 == 0);
+            substr($hap1{$chr}, $ini, $lenr) = 'X' x $lenr if ($len1 >= 1);
         }
         else {
             $event1{$chr}{$ini} = "$ini:$end:$ref:$all1" if($ref ne $all1 and $all1 ne '?');
@@ -151,7 +150,7 @@ if (defined $snv) {
                 substr($hap2{$chr}, $ini, $len2) = $all2 if ($all2 ne '?' and $ref ne $all2);
             }
             elsif ($type eq 'del') {
-                substr($hap2{$chr}, $ini, $lenr) = 'X' x $lenr if ($len2 == 0);
+                substr($hap2{$chr}, $ini, $lenr) = 'X' x $lenr if ($len2 >= 1);
             }
             else {
                 $event2{$chr}{$ini} = "$ini:$end:$ref:$all2" if($ref ne $all2 and $all2 ne '?');
@@ -162,6 +161,78 @@ if (defined $snv) {
     close F;
 }
 
+if (defined $sv) {
+    my ($s1, $s2, $f1, $f2);
+    warn "processing structural variations in $sv\n" if (defined $verbose);
+    my $sv_fh = defineFH($sv);
+    open F, "$sv_fh" or die "cannot open file $sv\n";
+    while (<F>) {
+        next if  (m/^#/);
+        next if  (m/^>/);
+        next if  (m/^\n/);
+        my ($nul1, $type, $nul2, $nul3, $frq, $ochr, $oini, $oend, $olen, $odir, $dchr, $dini, $dend, $dlen, $ddir) = split (/\s+/, $_);
+        next if !(defined $types{$type});
+        next if !(defined $hap1{$ochr});
+        if ($type eq 'deletion') {
+            if (defined $diploid) {
+                if ($frq =~ m/;/) {
+                    ($f1, $f2) = split (/;/, $frq);
+                    substr($hap1{$ochr}, $oini, $olen) = 'X' x $olen if ($f1 > 0.1);
+                    substr($hap2{$ochr}, $oini, $olen) = 'X' x $olen if ($f2 > 0.1);
+                }
+                else {
+                    substr($hap1{$ochr}, $oini, $olen) = 'X' x $olen;
+                    substr($hap2{$ochr}, $oini, $olen) = 'X' x $olen;
+                }
+            }
+            else {
+                substr($hap1{$ochr}, $oini, $olen) = 'X' x $olen;
+            }
+        }
+        elsif ($type eq 'probable-inversion') {
+            if (defined $diploid) {
+                if ($frq =~ m/;/) {
+                    ($f1, $f2) = split (/;/, $frq);
+                    $s1 = substr($hap1{$ochr}, $oini, $olen);
+                    $s2 = substr($hap2{$ochr}, $oini, $olen);
+                    substr($hap1{$ochr}, $oini, $olen) = reverse $s1 if ($f1 > 0.1);
+                    substr($hap2{$ochr}, $oini, $olen) = reverse $s2 if ($f2 > 0.1);
+                }
+                else {
+                    $s1 = substr($hap1{$ochr}, $oini, $olen);
+                    $s2 = substr($hap2{$ochr}, $oini, $olen);
+                    substr($hap1{$ochr}, $oini, $olen) = reverse $s1;
+                    substr($hap2{$ochr}, $oini, $olen) = reverse $s2;
+                }
+            }
+            else {
+                $s1 = substr($hap1{$ochr}, $oini, $olen);
+                substr($hap1{$ochr}, $oini, $olen) = reverse $s1;
+            }
+        }
+        else {
+            if (defined $diploid) {
+                if ($frq =~ m/;/) {
+                    my ($f1, $f2) = split (/;/, $frq);
+                    $event1{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir" if ($f1 > 0.1);
+                    $event2{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir" if ($f2 > 0.1);
+                }
+                else {
+                    $event1{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir";
+                    $event2{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir"
+                }
+            }
+            else {
+                $event1{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir";
+            }
+        }
+    }
+    close F;
+}
+
+
+
+writeFasta($out,      \%hap1);
 writeFasta("$out\_2", \%hap2) if (defined $diploid);
 
 ###################################
@@ -176,6 +247,7 @@ sub printVersion {
 
 sub readFasta {
     my ($fi, $seq_ref) = @_;
+    my $chr;
     warn "reading sequences from $fi\n" if (defined $verbose);
     my $fh = defineFH($fi);
     open F, "$fh" or die "cannot open $fi\n";
@@ -196,8 +268,9 @@ sub writeFasta {
     my ($fo, $seq_ref) = @_;
     warn "writing new sequences in $fo\n" if (defined $verbose);
     open O, ">$fo" or die "cannot write $fo\n";
-    while (($chr, $seq) = each %$seq_ref) {
+    while (my ($chr, $seq) = each %$seq_ref) {
         print O ">$chr\n";
+        $seq =~ tr/X//;
         while ($seq) {
             print O substr($seq, 0, 70), "\n";
             substr($seq, 0, 70) = '';
