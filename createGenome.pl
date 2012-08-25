@@ -142,7 +142,7 @@ if (defined $snv) {
             substr($hap1{$chr}, $ini, $lenr) = 'X' x $lenr if ($len1 >= 1);
         }
         else {
-            $event1{$chr}{$ini} = "$ini:$end:$ref:$all1" if($ref ne $all1 and $all1 ne '?');
+            $event1{$chr}{$ini} = "$type:$ini:$end:$ref:$all1" if($ref ne $all1 and $all1 ne '?');
         }
         
         if (defined $diploid) {
@@ -153,7 +153,7 @@ if (defined $snv) {
                 substr($hap2{$chr}, $ini, $lenr) = 'X' x $lenr if ($len2 >= 1);
             }
             else {
-                $event2{$chr}{$ini} = "$ini:$end:$ref:$all2" if($ref ne $all2 and $all2 ne '?');
+                $event2{$chr}{$ini} = "$type:$ini:$end:$ref:$all2" if($ref ne $all2 and $all2 ne '?');
             }
         }
         
@@ -230,6 +230,10 @@ if (defined $sv) {
     close F;
 }
 
+# At this point we already modified the sequences adding SNPs, symmetrical
+# substitutions or marking deletions, now we start altering the sequence with
+# variations (insertions, translocations, duplications) that will modify the 
+# coordinate system.
 
 
 writeFasta($out,      \%hap1);
