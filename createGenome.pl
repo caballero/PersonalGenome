@@ -86,6 +86,7 @@ my $sex       =   'M';
 my $our_version = 0.1;        # Script version number
 my %hap1;
 my %hap2;
+my %orig;
 my %event1;
 my %event2;
 my %types;
@@ -110,14 +111,17 @@ pod2usage(-verbose => 2) if !(defined $reference);
 pod2usage(-verbose => 2) if !(defined $out);
 pod2usage(-verbose => 2) if !(defined $snv or defined $sv);
 
+# Load sequences to memory
 readFasta($reference, \%hap1);
 %hap2 = %hap1 if (defined $diploid);
 
+# Defining variation categories
 my @types = split(/,/, $type);
 foreach my $t (@types) {
     $types{$t} = 1;
 }
 
+# Doing changes for SNV and small variations that don't affect the coordinates
 if (defined $snv) {
     warn "processing small variations in $snv\n" if (defined $verbose);
     my $snv_fh = defineFH($snv);
@@ -161,6 +165,7 @@ if (defined $snv) {
     close F;
 }
 
+# Doing changes for SV and other variations that don't affect the coordinates
 if (defined $sv) {
     my ($s1, $s2, $f1, $f2);
     warn "processing structural variations in $sv\n" if (defined $verbose);
@@ -177,8 +182,8 @@ if (defined $sv) {
             if (defined $diploid) {
                 if ($frq =~ m/;/) {
                     ($f1, $f2) = split (/;/, $frq);
-                    substr($hap1{$ochr}, $oini, $olen) = 'X' x $olen if ($f1 > 0.1);
-                    substr($hap2{$ochr}, $oini, $olen) = 'X' x $olen if ($f2 > 0.1);
+                    substr($hap1{$ochr}, $oini, $olen) = 'X' x $olen if ($f1 > 0.01);
+                    substr($hap2{$ochr}, $oini, $olen) = 'X' x $olen if ($f2 > 0.01);
                 }
                 else {
                     substr($hap1{$ochr}, $oini, $olen) = 'X' x $olen;
@@ -195,8 +200,8 @@ if (defined $sv) {
                     ($f1, $f2) = split (/;/, $frq);
                     $s1 = substr($hap1{$ochr}, $oini, $olen);
                     $s2 = substr($hap2{$ochr}, $oini, $olen);
-                    substr($hap1{$ochr}, $oini, $olen) = reverse $s1 if ($f1 > 0.1);
-                    substr($hap2{$ochr}, $oini, $olen) = reverse $s2 if ($f2 > 0.1);
+                    substr($hap1{$ochr}, $oini, $olen) = reverse $s1 if ($f1 > 0.01);
+                    substr($hap2{$ochr}, $oini, $olen) = reverse $s2 if ($f2 > 0.01);
                 }
                 else {
                     $s1 = substr($hap1{$ochr}, $oini, $olen);
@@ -214,28 +219,62 @@ if (defined $sv) {
             if (defined $diploid) {
                 if ($frq =~ m/;/) {
                     my ($f1, $f2) = split (/;/, $frq);
-                    $event1{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir" if ($f1 > 0.1);
-                    $event2{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir" if ($f2 > 0.1);
+                    $event1{$dchr}{$dini} = "$type:$ochr:$oini:$olen:$odir:$dchr:$dini:$dlen:$ddir" if ($f1 > 0.01);
+                    $event2{$dchr}{$dini} = "$type:$ochr:$oini:$olen:$odir:$dchr:$dini:$dlen:$ddir" if ($f2 > 0.01);
                 }
                 else {
-                    $event1{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir";
-                    $event2{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir"
+                    $event1{$dchr}{$dini} = "$type:$ochr:$oini:$olen:$odir:$dchr:$dini:$dlen:$ddir";
+                    $event2{$dchr}{$dini} = "$type:$ochr:$oini:$olen:$odir:$dchr:$dini:$dlen:$ddir";
                 }
             }
             else {
-                $event1{$ochr}{$oini} = "$type:$frq:$oini:$oend:$olen:$odir:$dchr:$dini:$dend:$dlen:$ddir";
+                $event1{$dchr}{$dini} = "$type:$ochr:$oini:$olen:$odir:$dchr:$dini:$dlen:$ddir";
             }
         }
     }
     close F;
 }
 
-# At this point we already modified the sequences adding SNPs, symmetrical
-# substitutions or marking deletions, now we start altering the sequence with
-# variations (insertions, translocations, duplications) that will modify the 
-# coordinate system.
+# Now we start altering the sequence with variations (ins & sub in masterVar;
+# distal-duplication, interchromosomal, inversion & tandem-duplication in hcSV)
+# that will modify the coordinate system.
+%orig = %hap1;
+foreach my $chr (keys %event1) {
+    my @pos = sort {$b<=>$a} (keys %{ $event1{$chr} }); # yes, we do changes in reverse order
+    foreach my $pos (@pos) {
+        my $event = $event1{$chr}{$pos};
+        if    ($event =~ m/^ins:/) { doInsSub   ($event, \$hap1{$chr}); }
+        elsif ($event =~ m/^sub:/) { doInsSub   ($event, \$hap1{$chr}); }
+        elsif ($event =~ m/^dist/) { doTransLoca($event, \$hap1{$chr}); }
+        elsif ($event =~ m/^inte/) { doTransLoca($event, \$hap1{$chr}); }
+        elsif ($event =~ m/^inve/) { doTransLoca($event, \$hap1{$chr}); }
+        elsif ($event =~ m/^tand/) { doTandemDup($event, \$hap1{$chr}); }
+        else {
+            # do nothig, we don't know what is it
+        }
+    }    
+}
 
+if (defined $diploid) {
+    %orig = %hap2;
+    foreach my $chr (keys %event2) {
+        my @pos = sort {$b<=>$a} (keys %{ $event2{$chr} }); # yes, we do changes in reverse order
+        foreach my $pos (@pos) {
+            my $event = $event1{$chr}{$pos};
+            if    ($event =~ m/^ins:/) { doInsSub   ($event, \$hap2{$chr}); }
+            elsif ($event =~ m/^sub:/) { doInsSub   ($event, \$hap2{$chr}); }
+            elsif ($event =~ m/^dist/) { doTransLoca($event, \$hap2{$chr}); }
+            elsif ($event =~ m/^inte/) { doTransLoca($event, \$hap2{$chr}); }
+            elsif ($event =~ m/^inve/) { doTransLoca($event, \$hap2{$chr}); }
+            elsif ($event =~ m/^tand/) { doTandemDup($event, \$hap2{$chr}); }
+            else {
+                # do nothig, we don't know what is it
+            }
+        }
+    }
+}
 
+# Writing final sequence(s)
 writeFasta($out,      \%hap1);
 writeFasta("$out\_2", \%hap2) if (defined $diploid);
 
@@ -243,7 +282,6 @@ writeFasta("$out\_2", \%hap2) if (defined $diploid);
 ####   S U B R O U T I N E S   ####
 ###################################
 
-# printVersion => return version number
 sub printVersion {
     print "$0 $our_version\n";
     exit 1;
@@ -290,4 +328,40 @@ sub defineFH {
     $fh = "bgrep unzip2 -c $fi | " if ($fi =~ m/bz2$/);
     my $res = undef;
     return $res;
+}
+
+sub revcomp {
+    my ($s) = @_;
+    my $r   = reverse $s;
+    $r =~ tr/ACGTacgt/TGCAtgca/;
+    return $r;
+}
+
+sub doInsSub {
+    my ($evt, $seq_ref) = @_;
+    my ($type, $ini, $end, $ref, $ins) = split (/:/, $evt);
+    if ($ini == $end) {
+        my $b = substr($$seq_ref, $ini, 1);
+        substr($$seq_ref, $ini, 1) = "$b$ins";
+    }
+    else {
+        my $len = $end - $ini;
+        my $b   = substr($$seq_ref, $ini, $len);
+        substr($$seq_ref, $ini, $len) = "$b$ins";
+    }
+}
+
+sub doTransLoca {
+    my ($evt, $seq_ref) = @_;
+    my ($type,$ochr,$oini,$olen,$odir,$dchr,$dini,$dlen,$ddir) = split (/:/, $evt);
+    my $orig = substr($orig{$ochr}, $oini, $olen);
+    $orig = revcomp($orig) if ($odir ne $ddir);
+    substr($$seq_ref, $dini, $dlen) = $orig;
+}
+
+sub doTandemDup {
+    my ($evt, $seq_ref) = @_;
+    my ($type,$ochr,$oini,$olen,$odir) = split (/:/, $evt);
+    my $orig = substr($orig{$ochr}, $oini, $olen);
+    substr($$seq_ref, $oini, $olen) = $orig x 2;
 }
