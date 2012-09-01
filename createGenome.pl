@@ -113,7 +113,14 @@ pod2usage(-verbose => 2) if !(defined $snv or defined $sv);
 
 # Load sequences to memory
 readFasta($reference, \%hap1);
-%hap2 = %hap1 if (defined $diploid);
+if (defined $diploid) {
+    foreach my $chr (keys %hap1) {
+        next if ($chr eq 'chrY' and $sex eq 'F');
+        next if ($chr eq 'chrX' and $sex eq 'M');
+        next if ($chr eq 'chrM');
+        $hap2{$chr} = $hap1{$chr};
+    }
+}
 
 # Defining variation categories
 my @types = split(/,/, $type);
